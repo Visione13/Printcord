@@ -14,6 +14,10 @@ tree = app_commands.CommandTree(client)
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("Pong! 🏓")
 
+@tree.command(name="test", description="lege ich so mehrere commands an?")
+async def ping(interaction: discord.Interaction):
+    await interaction.response.send_message("Yup")
+
 @client.event
 async def on_ready():
     print(f"Eingeloggt als {client.user}")
