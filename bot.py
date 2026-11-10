@@ -1,29 +1,36 @@
-import os
-import discord
-from discord import app_commands
+import os, json, ssl
+import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
 load_dotenv()
+IP = os.environ["BAMBU_IP"]
+SERIAL = os.environ["BAMBU_SERIAL"]
+CODE = os.environ["BAMBU_ACCESS_CODE"]
 
-GUILD = discord.Object(id=int(os.environ["GUILD_ID"]))
+def on_connect(client, userdata, flags, reason_code, properties):
+    print("Verbindung:", reason_code)
+    if reason_code.is_failure:
+        return
+    client.subscribe(f"device/{SERIAL}/report")
+    # Kompletten Zustand anfordern, sonst kommen nur Änderungen
+    client.publish(f"device/{SERIAL}/request",
+                   json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}}))
 
-client = discord.Client(intents=discord.Intents.default())
-tree = app_commands.CommandTree(client)
+def on_message(client, userdata, msg):
+    data = json.loads(msg.payload).get("print", {})
+    if "gcode_state" in data or "mc_percent" in data:
+        print("Status:", data.get("gcode_state"),
+              "| Fortschritt:", data.get("mc_percent"),
+              "| Rest (min):", data.get("mc_remaining_time"),
+              "| Datei:", data.get("subtask_name"))
 
-@tree.command(name="ping", description="Testet, ob der Bot lebt")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("Pong! 🏓")
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.username_pw_set("bblp", CODE)
+client.tls_set(cert_reqs=ssl.CERT_NONE)  # Drucker nutzt ein selbstsigniertes Zertifikat
+client.tls_insecure_set(True)
+client.on_connect = on_connect
+client.on_message = on_message
 
-@tree.command(name="test", description="lege ich so mehrere commands an?")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("Yup")
-
-@client.event
-async def on_ready():
-    print(f"Eingeloggt als {client.user}")
-    print("Server:", [g.name for g in client.guilds])
-    tree.copy_global_to(guild=GUILD)
-    synced = await tree.sync(guild=GUILD)
-    print(f"{len(synced)} Command(s) synchronisiert:", [c.name for c in synced])
-
-client.run(os.environ["DISCORD_TOKEN"])
+print("Verbinde mit", IP, "...")
+client.connect(IP, 8883)
+client.loop_forever()  # Beenden mit Strg+C
